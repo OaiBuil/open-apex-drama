@@ -229,14 +229,24 @@ class SdkCatalogRepository implements CatalogRepository {
   }
 
   @override
-  Future<List<Drama>> filter({Map<String, List<String>>? selections}) {
-    return _guard<List<Drama>>((OpenhongguoClient client) async {
+  Future<DramaPage> filter({
+    Map<String, List<String>>? selections,
+    String cursor = '',
+  }) {
+    return _guard<DramaPage>((OpenhongguoClient client) async {
       final ShortFilterPage page = await client.shortFilter(
-        ShortFilterQuery(selections: selections),
+        ShortFilterQuery(
+          selections: selections,
+          cursor: cursor.isEmpty ? null : cursor,
+        ),
       );
-      return <Drama>[
-        for (final SeriesSummary item in page.items) dramaFromSummary(item),
-      ];
+      return DramaPage(
+        items: <Drama>[
+          for (final SeriesSummary item in page.items) dramaFromSummary(item),
+        ],
+        cursor: page.cursor,
+        hasMore: page.hasMore && page.cursor.isNotEmpty,
+      );
     });
   }
 

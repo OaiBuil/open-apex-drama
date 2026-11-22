@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -630,6 +631,35 @@ void main() {
     });
   }
 
+  testWidgets('category screen appends the next filter page', (
+    WidgetTester tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      const Scaffold(body: CategoryScreen()),
+      size: const Size(390, 844),
+    );
+
+    final Finder loadMore = find.text('加载更多');
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(loadMore, findsOneWidget);
+    await tester.tap(loadMore);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    final Finder lastDrama = find.text(mockDramas.last.title);
+    await tester.fling(
+      find.byType(CustomScrollView),
+      const Offset(0, -1600),
+      2000,
+    );
+    await tester.pumpAndSettle();
+    expect(lastDrama, findsOneWidget);
+    expect(find.text('加载更多'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('category filter chip tap refreshes the result grid', (
     WidgetTester tester,
   ) async {
@@ -1025,6 +1055,64 @@ void main() {
 
       expect(find.text('下一集'), findsOneWidget);
       expect(find.byTooltip('播放设置'), findsNothing);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('player Windows fullscreen hides and restores native title bar', (
+    WidgetTester tester,
+  ) async {
+    const MethodChannel channel = MethodChannel('window_manager');
+    final List<MethodCall> calls = <MethodCall>[];
+    final TestDefaultBinaryMessenger messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (MethodCall call) async {
+      calls.add(call);
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await pumpScreen(
+        tester,
+        PlayerScreen(drama: mockHero),
+        size: const Size(800, 1000),
+      );
+
+      await tester.tap(find.byTooltip('全屏').first);
+      await tester.pump();
+      expect(
+        calls.map((MethodCall call) => call.method),
+        containsAllInOrder(<String>['setTitleBarStyle', 'setFullScreen']),
+      );
+      final Map<Object?, Object?> enterTitleArgs =
+          calls
+                  .firstWhere(
+                    (MethodCall call) => call.method == 'setTitleBarStyle',
+                  )
+                  .arguments
+              as Map<Object?, Object?>;
+      expect(enterTitleArgs['titleBarStyle'], 'hidden');
+      expect(enterTitleArgs['windowButtonVisibility'], isFalse);
+
+      calls.clear();
+      await tester.tap(find.byTooltip('退出全屏').first);
+      await tester.pump();
+      expect(
+        calls.map((MethodCall call) => call.method),
+        containsAllInOrder(<String>['setFullScreen', 'setTitleBarStyle']),
+      );
+      final Map<Object?, Object?> leaveTitleArgs =
+          calls
+                  .lastWhere(
+                    (MethodCall call) => call.method == 'setTitleBarStyle',
+                  )
+                  .arguments
+              as Map<Object?, Object?>;
+      expect(leaveTitleArgs['titleBarStyle'], 'normal');
       expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;

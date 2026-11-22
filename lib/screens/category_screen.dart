@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/remote/openhongguo_service.dart';
 import '../models/catalog.dart';
 import '../models/drama.dart';
 import '../providers/data_providers.dart';
 import '../theme/app_colors.dart';
 import '../widgets/ambient_glow.dart';
 import '../widgets/app_icon_button.dart';
+import '../widgets/app_pill_button.dart';
 import '../widgets/drama_card.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/page_layout.dart';
@@ -26,6 +28,12 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
   bool _filtersExpanded = false;
   /// 各筛选组选中的 value 集合；缺失或为空表示该组停留在「全部」（第一项）。
   final Map<String, Set<String>> _selected = <String, Set<String>>{};
+  List<Drama> _more = const <Drama>[];
+  String _moreCursor = '';
+  bool _moreHasMore = false;
+  String? _moreFor;
+  bool _loadingMore = false;
+  int _pagingGeneration = 0;
 
   void _onSearch() {
     openSearch(context);
@@ -64,6 +72,7 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
   void _toggle(FilterGroupData group, List<(String, String)> options, int index) {
     final String value = options[index].$2;
     setState(() {
+      _resetPaging();
       // 每组第一项是「全部」（value 为空）：点击即回到该组不筛选的状态。
       if (index == 0 || value.isEmpty) {
         _selected.remove(group.key);
@@ -80,6 +89,64 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
         _selected.remove(group.key);
       }
     });
+  }
+
+  void _resetPaging() {
+    _pagingGeneration++;
+    _more = const <Drama>[];
+    _moreCursor = '';
+    _moreHasMore = false;
+    _moreFor = null;
+    _loadingMore = false;
+  }
+
+  Future<void> _loadMore(String selectionsKey, DramaPage firstPage) async {
+    if (_loadingMore) {
+      return;
+    }
+    final bool chained = _moreFor == selectionsKey;
+    final String cursor = chained ? _moreCursor : firstPage.cursor;
+    if (cursor.isEmpty) {
+      return;
+    }
+    final int generation = _pagingGeneration;
+    setState(() => _loadingMore = true);
+    try {
+      final DramaPage next = await ref
+          .read(catalogRepositoryProvider)
+          .filter(
+            selections: filterSelectionsFromKey(selectionsKey),
+            cursor: cursor,
+          );
+      if (!mounted || generation != _pagingGeneration) {
+        return;
+      }
+      setState(() {
+        final Set<String> seen = <String>{
+          for (final Drama drama in firstPage.items) drama.id,
+          for (final Drama drama in _more) drama.id,
+        };
+        _more = <Drama>[
+          ..._more,
+          for (final Drama drama in next.items)
+            if (seen.add(drama.id)) drama,
+        ];
+        _moreFor = selectionsKey;
+        _moreCursor = next.cursor;
+        _moreHasMore =
+            next.hasMore && next.cursor.isNotEmpty && next.cursor != cursor;
+      });
+    } on ApiException catch (error) {
+      if (mounted && generation == _pagingGeneration) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(error.userMessage)));
+      }
+    } finally {
+      if (mounted && generation == _pagingGeneration) {
+        setState(() => _loadingMore = false);
+      }
+    }
   }
 
   /// 缓存键格式 `key=v1,v2;key2=v3`：组内 value 与组间 key 均按字典序排序，
@@ -132,10 +199,17 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
     final bool showingAll = selectionsKey.isEmpty;
 
     // 全部/筛选统一走筛选接口：空 selections 即全量真实短剧列表。
-    final AsyncValue<List<Drama>> resultAsync = ref.watch(
+    final AsyncValue<DramaPage> resultAsync = ref.watch(
       filterResultProvider(selectionsKey),
     );
-    final List<Drama> dramas = resultAsync.value ?? const <Drama>[];
+    final DramaPage? firstPage = resultAsync.value;
+    final bool chained = _moreFor == selectionsKey;
+    final List<Drama> dramas = <Drama>[
+      ...?firstPage?.items,
+      if (chained) ..._more,
+    ];
+    final bool hasMore =
+        firstPage != null && (chained ? _moreHasMore : firstPage.hasMore);
     final bool resultLoading = resultAsync.isLoading && dramas.isEmpty;
 
     return AmbientGlow(
@@ -218,7 +292,9 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
                       if (!resultLoading) ...<Widget>[
                         const SizedBox(width: 12),
                         Text(
-                          '共 ${dramas.length} 部',
+                          hasMore
+                              ? '已显示 ${dramas.length} 部'
+                              : '共 ${dramas.length} 部',
                           style: TextStyle(
                             fontSize: 11,
                             height: 1.2,
@@ -264,7 +340,10 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
                       title: '该题材正在筹备中',
                       message: '换个题材看看，更多好剧持续上新',
                       actionLabel: '看全部',
-                      onAction: () => setState(() => _selected.clear()),
+                      onAction: () => setState(() {
+                        _resetPaging();
+                        _selected.clear();
+                      }),
                     ),
                   ),
                 )
@@ -288,6 +367,20 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
                         onTap: () => openDramaDetail(context, drama),
                       );
                     }, childCount: dramas.length),
+                  ),
+                ),
+              if (hasMore)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(horizontal, 14, horizontal, 6),
+                    child: Center(
+                      child: AppPillButton(
+                        label: _loadingMore ? '加载中…' : '加载更多',
+                        onPressed: _loadingMore
+                            ? null
+                            : () => _loadMore(selectionsKey, firstPage),
+                      ),
+                    ),
                   ),
                 ),
             ],

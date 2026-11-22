@@ -37,7 +37,10 @@ abstract class CatalogRepository {
   Future<List<Drama>> categorySeries(String categoryId);
 
   /// 按筛选条件取剧集（shortFilter）。
-  Future<List<Drama>> filter({Map<String, List<String>>? selections});
+  Future<DramaPage> filter({
+    Map<String, List<String>>? selections,
+    String cursor = '',
+  });
 
   /// 分类筛选面板（题材/状态/排序等维度）。
   Future<List<FilterGroupData>> filterPanel();

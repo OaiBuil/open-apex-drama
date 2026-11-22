@@ -14,6 +14,7 @@ class MockCatalogRepository implements CatalogRepository {
   /// 演示分页的每页条数：让 12 部演示数据正好分成两页，
   /// 首页与「换一换」都能观察到内容变化。
   static const int _discoverPageSize = 6;
+  static const int _filterPageSize = 6;
 
   @override
   Future<DramaPage> discoverFeed(
@@ -80,15 +81,26 @@ class MockCatalogRepository implements CatalogRepository {
   }
 
   @override
-  Future<List<Drama>> filter({Map<String, List<String>>? selections}) async {
+  Future<DramaPage> filter({
+    Map<String, List<String>>? selections,
+    String cursor = '',
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     final List<String> genres = selections?['genre'] ?? const <String>[];
-    if (genres.isEmpty) {
-      return mockDramas;
+    final List<Drama> all = genres.isEmpty
+        ? mockDramas
+        : mockDramas.where((Drama d) => genres.contains(d.category)).toList();
+    final int start = int.tryParse(cursor) ?? 0;
+    if (start >= all.length) {
+      return const DramaPage(items: <Drama>[]);
     }
-    return mockDramas
-        .where((Drama d) => genres.contains(d.category))
-        .toList();
+    final int end = math.min(start + _filterPageSize, all.length);
+    final bool hasMore = end < all.length;
+    return DramaPage(
+      items: all.sublist(start, end),
+      cursor: hasMore ? '$end' : '',
+      hasMore: hasMore,
+    );
   }
 
   @override
