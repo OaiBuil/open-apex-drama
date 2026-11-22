@@ -1,0 +1,47 @@
+name: Windows package
+
+on:
+  push:
+    branches:
+      - fix/category-pagination-window-fullscreen
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.9'
+
+jobs:
+  windows:
+    name: Build Windows installer and portable zip
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build and package Windows app
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tool/package_windows.ps1
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApexDrama-1.5.4-windows-x64
+          path: |
+            dist/ApexDrama-1.5.4-windows-x64-setup.exe
+            dist/ApexDrama-1.5.4-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
